@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { changeDigit, DEFAULT_TIMES, dueCompartments, initialClock, MINUTE, parseTimes, updateClock } from './medbox.ts'
+import { changeDigit, DEFAULT_TIMES, dueCompartments, initialClock, MINUTE, parseTimes, updateClock, updateMenu } from './medbox.ts'
+import type { MenuState } from './medbox.ts'
 
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 10, day, hour, minute).getTime()
 
@@ -36,4 +37,39 @@ test('test clock freezes wall ticks and confirmations clear only the chosen alar
   const resumed = updateClock(confirmed, { type: 'toggle', now: at(17, 9) })
   assert.equal(resumed.now, at(17, 9))
   assert.equal(resumed.test, false)
+})
+
+test('requires a long OK press to select and saves only the configured dose after four digits', () => {
+  const normal: MenuState = { times: DEFAULT_TIMES, selected: 0, mode: { kind: 'normal' } }
+  assert.equal(updateMenu(normal, { type: 'ok' }), normal)
+  assert.equal(updateMenu(normal, { type: 'move', step: 1 }), normal)
+  let state = updateMenu(normal, { type: 'hold-ok' })
+  assert.equal(state.mode.kind, 'selecionar')
+  state = updateMenu(state, { type: 'move', step: -1 })
+  assert.equal(state.selected, 3)
+  state = updateMenu(state, { type: 'ok' })
+  assert.deepEqual(state.mode, { kind: 'digito', draft: '22:00', digit: 0 })
+  assert.equal(updateMenu(state, { type: 'hold-ok' }), state)
+  state = updateMenu(state, { type: 'ok' })
+  state = updateMenu(state, { type: 'move', step: 1 })
+  state = updateMenu(state, { type: 'ok' })
+  state = updateMenu(state, { type: 'move', step: -1 })
+  state = updateMenu(state, { type: 'ok' })
+  state = updateMenu(state, { type: 'move', step: -1 })
+  assert.equal(state.times, DEFAULT_TIMES)
+  state = updateMenu(state, { type: 'ok' })
+  assert.equal(state.mode.kind, 'normal')
+  assert.deepEqual(state.times, ['08:00', '12:00', '18:00', '23:59'])
+})
+
+test('cancel exits to normal and changing the selected dose discards an unsaved draft', () => {
+  const editing: MenuState = {
+    times: DEFAULT_TIMES, selected: 0, mode: { kind: 'digito', draft: '00:00', digit: 2 },
+  }
+  const selecting = updateMenu(editing, { type: 'select', index: 1 })
+  assert.equal(selecting.mode.kind, 'selecionar')
+  assert.deepEqual(updateMenu(selecting, { type: 'ok' }).mode, { kind: 'digito', draft: '12:00', digit: 0 })
+  assert.deepEqual(updateMenu(editing, { type: 'cancel' }), {
+    times: DEFAULT_TIMES, selected: 0, mode: { kind: 'normal' },
+  })
 })
