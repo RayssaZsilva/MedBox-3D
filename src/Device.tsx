@@ -1,7 +1,7 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { ContactShadows, OrbitControls, RoundedBox } from '@react-three/drei'
 import { memo, useEffect, useMemo, useRef } from 'react'
-import { CanvasTexture, CatmullRomCurve3, Group, MathUtils, SRGBColorSpace, Vector3 } from 'three'
+import { BufferGeometry, CanvasTexture, CatmullRomCurve3, DoubleSide, Float32BufferAttribute, Group, MathUtils, ShapeUtils, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import type { OkButton } from './useOkButton'
 
 type Point = [number, number, number]
@@ -152,13 +152,15 @@ function Wire({ color, points }: { color: string; points: Point[] }) {
   </mesh>
 }
 
-const panelZ = -1.68
-const panelSurface = 0.64
+const panelZ = -1.59
+const panelSurface = 0.56
+const lcdHalfWidth = 0.86
+const lcdHalfDepth = 0.23
 const buttonX = [1.25, 1.72, 2.19]
 const buttonPins = ['33', '32', '26']
 const buttonColors = ['#f4e173', '#e89cba', '#f39c63']
 
-// The upper panel's harness passes through the rear wall of the lower chamber.
+// The upper panel's harness rises through the chamber to the underside of the deck.
 function panelLead(x: number): Point[] {
   return [[x, -0.27, -0.95], [x, -0.12, panelZ], [x, panelSurface - 0.035, panelZ]]
 }
@@ -225,16 +227,103 @@ const Electronics = memo(function Electronics() {
   </group>
 })
 
+function createEnclosure() {
+  const side = 3.325
+  const innerSide = 3.18
+  const front = 1.325
+  const innerFront = 1.16
+  const rear = -1.95
+  const innerRear = -1.84
+  const deckEdge = -1.24
+  const bottom = -0.645
+  const floor = -0.455
+  const rim = 0.19
+  const deckUnderside = panelSurface - 0.12
+  const positions: number[] = []
+
+  function quad(a: Point, b: Point, c: Point, d: Point) {
+    positions.push(...a, ...b, ...c, ...a, ...c, ...d)
+  }
+
+  function horizontal(y: number, left: number, right: number, back: number, forward: number) {
+    quad([left, y, back], [right, y, back], [right, y, forward], [left, y, forward])
+  }
+
+  function wall(z: number, halfWidth: number, low: number, high: number) {
+    quad([-halfWidth, low, z], [halfWidth, low, z], [halfWidth, high, z], [-halfWidth, high, z])
+  }
+
+  // Both exterior side walls follow the same profile from the floor to the rear deck.
+  function sideWall(x: number, low: number, back: number, forward: number, top: number) {
+    const profile = [
+      new Vector2(low, back), new Vector2(top, back), new Vector2(top, deckEdge),
+      new Vector2(rim, deckEdge), new Vector2(rim, forward), new Vector2(low, forward),
+    ]
+    for (const face of ShapeUtils.triangulateShape(profile, [])) {
+      for (const vertex of face) positions.push(x, profile[vertex].x, profile[vertex].y)
+    }
+  }
+
+  horizontal(bottom, -side, side, rear, front)
+  horizontal(floor, -innerSide, innerSide, innerRear, innerFront)
+  wall(front, side, bottom, rim)
+  wall(innerFront, innerSide, floor, rim)
+  wall(rear, side, bottom, panelSurface)
+  wall(innerRear, innerSide, floor, deckUnderside)
+  wall(deckEdge, side, deckUnderside, panelSurface)
+  for (const sign of [-1, 1]) {
+    sideWall(sign * side, bottom, rear, front, panelSurface)
+    sideWall(sign * innerSide, floor, innerRear, innerFront, deckUnderside)
+  }
+  horizontal(rim, -side, side, innerFront, front)
+  horizontal(rim, -side, -innerSide, deckEdge, innerFront)
+  horizontal(rim, innerSide, side, deckEdge, innerFront)
+  quad([-side, rim, deckEdge], [-innerSide, rim, deckEdge],
+    [-innerSide, deckUnderside, deckEdge], [-side, deckUnderside, deckEdge])
+  quad([innerSide, rim, deckEdge], [side, rim, deckEdge],
+    [side, deckUnderside, deckEdge], [innerSide, deckUnderside, deckEdge])
+
+  // Leave an aperture in the molded deck so the LCD sits below its surface.
+  const lcdRear = panelZ - lcdHalfDepth
+  const lcdFront = panelZ + lcdHalfDepth
+  for (const y of [panelSurface, deckUnderside]) {
+    const halfWidth = y === panelSurface ? side : innerSide
+    const back = y === panelSurface ? rear : innerRear
+    horizontal(y, -halfWidth, -lcdHalfWidth, back, deckEdge)
+    horizontal(y, lcdHalfWidth, halfWidth, back, deckEdge)
+    horizontal(y, -lcdHalfWidth, lcdHalfWidth, back, lcdRear)
+    horizontal(y, -lcdHalfWidth, lcdHalfWidth, lcdFront, deckEdge)
+  }
+  wall(lcdRear, lcdHalfWidth, deckUnderside, panelSurface)
+  wall(lcdFront, lcdHalfWidth, deckUnderside, panelSurface)
+  for (const x of [-lcdHalfWidth, lcdHalfWidth]) {
+    quad([x, deckUnderside, lcdRear], [x, deckUnderside, lcdFront],
+      [x, panelSurface, lcdFront], [x, panelSurface, lcdRear])
+  }
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+function Enclosure() {
+  const geometry = useMemo(createEnclosure, [])
+  useEffect(() => () => geometry.dispose(), [geometry])
+  return <mesh name="Corpo integrado" geometry={geometry}>
+    <meshStandardMaterial color="#625477" roughness={0.47} side={DoubleSide} />
+  </mesh>
+}
+
 function TopPanel({ lcd, lcdCursor, onStep, okButton }: DeviceProps) {
   return <group name="Painel superior" position={[0, panelSurface, panelZ]}>
-    <Block position={[0, -0.26, 0.055]} size={[6.60, 0.52, 0.76]} color="#625477" radius={0.07} />
-    <Block position={[0, 0.022, 0]} size={[1.72, 0.084, 0.46]} color="#282b31" radius={0.039} />
-    <Block position={[0, 0.068, 0]} size={[1.48, 0.017, 0.34]} color="#bedca2" radius={0.026} />
-    <Label lines={lcd} cursor={lcdCursor} position={[0, 0.079, 0]}
+    <Block position={[0, -0.056, 0]} size={[lcdHalfWidth * 2, 0.084, lcdHalfDepth * 2]} color="#282b31" radius={0.027} />
+    <Block position={[0, -0.018, 0]} size={[1.53, 0.017, 0.35]} color="#bedca2" radius={0.02} />
+    <Label lines={lcd} cursor={lcdCursor} position={[0, -0.008, 0]}
       size={[1.43, 0.31]} color="#25403a" />
     {buttonX.map((x, index) => {
       const ok = index === 2
-      return <group key={x} position={[x, 0.045, 0]}
+      return <group key={x} position={[x, 0, 0]}
         onClick={(event) => { event.stopPropagation(); if (!ok) onStep(index === 0 ? -1 : 1) }}
         onPointerDown={ok ? (event) => {
           if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) okButton.press()
@@ -244,9 +333,8 @@ function TopPanel({ lcd, lcdCursor, onStep, okButton }: DeviceProps) {
         } : undefined}
         onPointerCancel={ok ? okButton.cancel : undefined}
         onPointerOut={ok ? okButton.cancel : undefined}>
-        <Block position={[0, 0, 0]} size={[0.34, 0.10, 0.31]} color={graphite} radius={0.051} />
-        <group position={[0, ok && okButton.pressed ? 0.04 : 0.067, 0]}>
-          <Block position={[0, 0, 0]} size={[0.27, 0.08, 0.24]} color="#a385d1" radius={0.046} />
+        <group position={[0, ok && okButton.pressed ? -0.005 : 0.023, 0]}>
+          <Block position={[0, 0, 0]} size={[0.27, 0.08, 0.24]} color="#a385d1" radius={0.027} />
           <Label lines={[['−', '+', 'OK'][index]]} position={[0, 0.042, 0]} size={[0.28, 0.26]} />
         </group>
       </group>
@@ -254,9 +342,8 @@ function TopPanel({ lcd, lcdCursor, onStep, okButton }: DeviceProps) {
   </group>
 }
 
-function FrontTrim({ pending }: { pending: boolean[] }) {
-  return <group name="Acabamento frontal e LEDs">
-    <Block position={[0, -0.16, 1.23]} size={[6.60, 0.70, 0.17]} color="#625477" radius={0.07} />
+function FrontLeds({ pending }: { pending: boolean[] }) {
+  return <group name="LEDs frontais">
     {slots.map((x, index) => <group key={x} position={[x, 0.17, 1.18]} name={`LED GPIO${ledWires[index][0]}`}>
       <Cylinder position={[0, 0.04, 0]} radius={0.091} height={0.047} color={graphite} />
       <mesh position={[0, 0.08, 0]}>
@@ -285,12 +372,9 @@ function Model(props: DeviceProps) {
     if (inspection.current !== target) invalidate()
   })
   return <group>
-    <Block position={[0, -0.55, 0]} size={[6.65, 0.19, 2.65]} color={graphite} radius={0.09} />
-    {[-3.26, 3.26].map((x) => <Block key={x} position={[x, -0.13, 0]} size={[0.15, 0.68, 2.56]}
-      color={graphite} radius={0.065} />)}
-    <Block position={[0, -0.13, -1.22]} size={[6.53, 0.68, 0.145]} color={graphite} radius={0.06} />
+    <Enclosure />
     {props.internal && <Electronics />}
-    <FrontTrim pending={props.pending} />
+    <FrontLeds pending={props.pending} />
     <TopPanel {...props} />
     <group ref={tray} name="Bandeja de medicamentos">
       <Block position={[0, 0.14, -0.12]} size={[6.51, 0.17, 2.22]} color="#9d84ba" radius={0.073} />
@@ -301,7 +385,7 @@ function Model(props: DeviceProps) {
 }
 
 export function Device(props: DeviceProps) {
-  return <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: [2.85, 7.9, 8.8], fov: 42 }}
+  return <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: [2.85, 9.5, 7.0], fov: 42 }}
     fallback={<p className="webgl-fallback">A visualização 3D precisa de WebGL. Os controles continuam disponíveis.</p>}>
     <ambientLight intensity={1.3} />
     <directionalLight position={[-4, 8, 6]} intensity={2.0} color="#fff3ed" />
