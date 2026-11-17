@@ -24,7 +24,7 @@ npm run build
 
 ## Câmara eletrônica
 
-Uma ESP32, um RTC DS1307 e um buzzer ficam abaixo dos compartimentos. O LCD e os três botões ficam na frente, com um LED próximo a cada tampa. Os cabos da vista interna representam o chicote de sinais e as ligações comuns.
+Uma ESP32, um RTC DS1307 e um buzzer ficam abaixo dos compartimentos. O LCD centralizado e os três botões à direita ficam na faixa superior atrás das tampas. Cada tampa tem um LED próximo, na face frontal. Os cabos da vista interna representam o chicote de sinais e as ligações comuns.
 
 | Componente | Conexão na ESP32 |
 | --- | --- |

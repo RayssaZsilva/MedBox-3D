@@ -54,11 +54,10 @@ function Cylinder({ position, radius, height, color, rotation, metalness = 0 }: 
   </mesh>
 }
 
-function Label({ lines, position, size, front = false, color = '#fff', cursor = -1 }: {
+function Label({ lines, position, size, color = '#fff', cursor = -1 }: {
   lines: string[]
   position: Point
   size: [number, number]
-  front?: boolean
   color?: string
   cursor?: number
 }) {
@@ -97,7 +96,7 @@ function Label({ lines, position, size, front = false, color = '#fff', cursor = 
     return map
   }, [content, color, cursor])
   useEffect(() => () => texture.dispose(), [texture])
-  return <mesh rotation={front ? [0, 0, 0] : [-Math.PI / 2, 0, 0]} position={position}>
+  return <mesh rotation={[-Math.PI / 2, 0, 0]} position={position}>
     <planeGeometry args={size} />
     <meshBasicMaterial map={texture} transparent depthWrite={false} />
   </mesh>
@@ -153,9 +152,16 @@ function Wire({ color, points }: { color: string; points: Point[] }) {
   </mesh>
 }
 
-const buttonX = [0.55, 1.03, 1.55]
+const panelZ = -1.68
+const panelSurface = 0.64
+const buttonX = [1.25, 1.72, 2.19]
 const buttonPins = ['33', '32', '26']
 const buttonColors = ['#f4e173', '#e89cba', '#f39c63']
+
+// The upper panel's harness passes through the rear wall of the lower chamber.
+function panelLead(x: number): Point[] {
+  return [[x, -0.27, -0.95], [x, -0.12, panelZ], [x, panelSurface - 0.035, panelZ]]
+}
 
 const Electronics = memo(function Electronics() {
   return <group name="Câmara eletrônica inferior">
@@ -191,8 +197,8 @@ const Electronics = memo(function Electronics() {
         [slots[index], -0.10, 1.12], [slots[index], 0.18, 1.22],
       ]} />)}
       {buttonPins.map((pin, index) => <Wire key={pin} color={buttonColors[index]} points={[
-        espPins[pin], [-2.24, -0.31, 0.60 + index * 0.10], [buttonX[index], -0.30, 0.83 + index * 0.08],
-        [buttonX[index], -0.16, 1.19],
+        espPins[pin], [-2.24, -0.31, 0.60 + index * 0.10], [buttonX[index], -0.31, -0.14 - index * 0.15],
+        ...panelLead(buttonX[index]),
       ]} />)}
       {(['21', '22'] as const).map((pin, index) => {
         const junction: Point = [-0.65 + index * 0.14, -0.23, 0.08]
@@ -200,35 +206,35 @@ const Electronics = memo(function Electronics() {
         return <group key={pin} name={index === 0 ? 'I²C SDA GPIO21' : 'I²C SCL GPIO22'}>
           <Wire color={color} points={[espPins[pin], [-1.04, -0.24, 0.08 + index * 0.12], junction]} />
           <Wire color={color} points={[junction, [-0.29, -0.28, -0.07], [0.13 + index * 0.09, -0.34, -0.24]]} />
-          <Wire color={color} points={[junction, [-0.77 + index * 0.14, -0.28, 0.66], [-1.12 + index * 0.15, -0.17, 1.18]]} />
+          <Wire color={color} points={[junction, [-0.77 + index * 0.14, -0.28, -0.55], ...panelLead(-0.30 + index * 0.15)]} />
         </group>
       })}
       <Wire color="#d493ea" points={[espPins['25'], [-2.33, -0.28, -0.54], [-0.91, -0.26, -0.88], [1.16, -0.40, -0.43]]} />
       <Wire color="#dc6969" points={[espPins.power, [-2.25, -0.38, 0.66], [-0.22, -0.34, 0.51], [0.31, -0.35, -0.24]]} />
-      <Wire color="#dc6969" points={[[-0.22, -0.34, 0.51], [-0.44, -0.33, 0.7], [-0.79, -0.15, 1.16]]} />
+      <Wire color="#dc6969" points={[[-0.22, -0.34, 0.51], [-0.44, -0.33, -0.52], ...panelLead(0)]} />
       <Wire color="#545873" points={[espPins.gnd, [-2.37, -0.40, 0.65], [-0.02, -0.40, 0.54], [1.28, -0.41, -0.42]]} />
-      <Wire color="#545873" points={[[0.40, -0.35, -0.24], [0.47, -0.42, 0.22], [-0.02, -0.40, 0.54], [-0.62, -0.17, 1.16]]} />
+      <Wire color="#545873" points={[[0.40, -0.35, -0.24], [0.47, -0.42, 0.22], [-0.02, -0.40, 0.54], [0.24, -0.34, -0.52], ...panelLead(0.15)]} />
       {slots.map((x, index) => <Wire key={x} color="#545873" points={[
         [-0.02, -0.40, 0.54], [x + 0.07, -0.34, 0.83 + index * 0.06],
         [x + 0.07, -0.18, 1.08], [x + 0.04, 0.17, 1.20],
       ]} />)}
       {buttonX.map((x, index) => <Wire key={x} color="#545873" points={[
-        [-0.02, -0.40, 0.54], [x + 0.05, -0.36, 0.72 + index * 0.09], [x + 0.08, -0.20, 1.18],
+        [-0.02, -0.40, 0.54], [x + 0.05, -0.36, -0.18 - index * 0.10], ...panelLead(x + 0.08),
       ]} />)}
     </group>
   </group>
 })
 
-function FrontPanel({ lcd, lcdCursor, onStep, okButton, pending }: DeviceProps) {
-  return <group name="Painel frontal">
-    <Block position={[0, -0.16, 1.23]} size={[6.60, 0.70, 0.17]} color="#625477" radius={0.07} />
-    <Block position={[-0.82, -0.155, 1.327]} size={[1.72, 0.46, 0.084]} color="#282b31" radius={0.039} />
-    <Block position={[-0.82, -0.155, 1.373]} size={[1.48, 0.34, 0.017]} color="#bedca2" radius={0.026} />
-    <Label lines={lcd} cursor={lcdCursor} position={[-0.82, -0.155, 1.384]}
-      size={[1.43, 0.31]} color="#25403a" front />
+function TopPanel({ lcd, lcdCursor, onStep, okButton }: DeviceProps) {
+  return <group name="Painel superior" position={[0, panelSurface, panelZ]}>
+    <Block position={[0, -0.26, 0.055]} size={[6.60, 0.52, 0.76]} color="#625477" radius={0.07} />
+    <Block position={[0, 0.022, 0]} size={[1.72, 0.084, 0.46]} color="#282b31" radius={0.039} />
+    <Block position={[0, 0.068, 0]} size={[1.48, 0.017, 0.34]} color="#bedca2" radius={0.026} />
+    <Label lines={lcd} cursor={lcdCursor} position={[0, 0.079, 0]}
+      size={[1.43, 0.31]} color="#25403a" />
     {buttonX.map((x, index) => {
       const ok = index === 2
-      return <group key={x} position={[x, -0.154, 1.36]}
+      return <group key={x} position={[x, 0.045, 0]}
         onClick={(event) => { event.stopPropagation(); if (!ok) onStep(index === 0 ? -1 : 1) }}
         onPointerDown={ok ? (event) => {
           if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) okButton.press()
@@ -238,14 +244,19 @@ function FrontPanel({ lcd, lcdCursor, onStep, okButton, pending }: DeviceProps) 
         } : undefined}
         onPointerCancel={ok ? okButton.cancel : undefined}
         onPointerOut={ok ? okButton.cancel : undefined}>
-        <Block position={[0, 0, 0]} size={[0.34, 0.31, 0.10]} color={graphite} radius={0.051} />
-        <group position={[0, 0, ok && okButton.pressed ? 0.04 : 0.067]}>
-          <Block position={[0, 0, 0]} size={[0.27, 0.24, 0.08]} color="#a385d1" radius={0.046} />
-          <Label lines={[['−', '+', 'OK'][index]]} position={[0, 0, 0.042]}
-            size={[0.28, 0.26]} front />
+        <Block position={[0, 0, 0]} size={[0.34, 0.10, 0.31]} color={graphite} radius={0.051} />
+        <group position={[0, ok && okButton.pressed ? 0.04 : 0.067, 0]}>
+          <Block position={[0, 0, 0]} size={[0.27, 0.08, 0.24]} color="#a385d1" radius={0.046} />
+          <Label lines={[['−', '+', 'OK'][index]]} position={[0, 0.042, 0]} size={[0.28, 0.26]} />
         </group>
       </group>
     })}
+  </group>
+}
+
+function FrontTrim({ pending }: { pending: boolean[] }) {
+  return <group name="Acabamento frontal e LEDs">
+    <Block position={[0, -0.16, 1.23]} size={[6.60, 0.70, 0.17]} color="#625477" radius={0.07} />
     {slots.map((x, index) => <group key={x} position={[x, 0.17, 1.18]} name={`LED GPIO${ledWires[index][0]}`}>
       <Cylinder position={[0, 0.04, 0]} radius={0.091} height={0.047} color={graphite} />
       <mesh position={[0, 0.08, 0]}>
@@ -259,18 +270,19 @@ function FrontPanel({ lcd, lcdCursor, onStep, okButton, pending }: DeviceProps) 
 
 function Model(props: DeviceProps) {
   const tray = useRef<Group>(null)
+  const inspection = useRef(0)
   useFrame(({ invalidate }, delta) => {
     if (!tray.current) return
-    const { position } = tray.current
-    const y = props.internal ? 1.05 : 0
-    const z = props.internal ? -1.35 : 0
-    if (Math.abs(position.y - y) + Math.abs(position.z - z) < 0.002) {
-      position.set(0, y, z)
-      return
-    }
-    position.y = MathUtils.damp(position.y, y, 8, Math.min(delta, 0.05))
-    position.z = MathUtils.damp(position.z, z, 8, Math.min(delta, 0.05))
-    invalidate()
+    const target = props.internal ? 1 : 0
+    const current = inspection.current
+    if (current === target) return
+    const next = MathUtils.damp(current, target, 8, Math.min(delta, 0.05))
+    inspection.current = Math.abs(next - target) < 0.002 ? target : next
+    // Lift above the fixed rear panel before sliding back. Reverse the path when closing.
+    const lift = MathUtils.smoothstep(inspection.current, 0, 0.5)
+    const slide = MathUtils.smoothstep(inspection.current, 0.5, 1)
+    tray.current.position.set(0, lift * 1.05, slide * -1.35)
+    if (inspection.current !== target) invalidate()
   })
   return <group>
     <Block position={[0, -0.55, 0]} size={[6.65, 0.19, 2.65]} color={graphite} radius={0.09} />
@@ -278,7 +290,8 @@ function Model(props: DeviceProps) {
       color={graphite} radius={0.065} />)}
     <Block position={[0, -0.13, -1.22]} size={[6.53, 0.68, 0.145]} color={graphite} radius={0.06} />
     {props.internal && <Electronics />}
-    <FrontPanel {...props} />
+    <FrontTrim pending={props.pending} />
+    <TopPanel {...props} />
     <group ref={tray} name="Bandeja de medicamentos">
       <Block position={[0, 0.14, -0.12]} size={[6.51, 0.17, 2.22]} color="#9d84ba" radius={0.073} />
       {props.open.map((open, index) => <Compartment key={index} index={index} open={open}
@@ -288,14 +301,14 @@ function Model(props: DeviceProps) {
 }
 
 export function Device(props: DeviceProps) {
-  return <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: [4.1, 5.9, 10.25], fov: 42 }}
+  return <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: [2.85, 7.9, 8.8], fov: 42 }}
     fallback={<p className="webgl-fallback">A visualização 3D precisa de WebGL. Os controles continuam disponíveis.</p>}>
     <ambientLight intensity={1.3} />
     <directionalLight position={[-4, 8, 6]} intensity={2.0} color="#fff3ed" />
     <directionalLight position={[5, 3, -6]} intensity={1.05} color="#d8c6ff" />
     <Model {...props} />
     <ContactShadows frames={1} position={[0, -0.655, 0]} scale={13} resolution={256} blur={2.8} opacity={0.39} far={5} />
-    <OrbitControls target={[0, 0.34, -0.32]} enablePan={false} minDistance={6} maxDistance={17}
+    <OrbitControls target={[0, 0.34, -0.48]} enablePan={false} minDistance={6} maxDistance={17}
       maxPolarAngle={Math.PI / 2.12} makeDefault />
   </Canvas>
 }
