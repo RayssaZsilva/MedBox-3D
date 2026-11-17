@@ -79,13 +79,17 @@ function Compartment({ index, open, pending, internal, onLid }: {
   onLid: () => void
 }) {
   const hinge = useRef<Group>(null)
-  useFrame(({ clock }, delta) => {
-    if (hinge.current) {
-      hinge.current.rotation.x = MathUtils.damp(hinge.current.rotation.x, open || internal ? -1.72 : 0, 8, delta)
+  useFrame(({ invalidate }, delta) => {
+    if (!hinge.current) return
+    const target = open || internal ? -1.72 : 0
+    const rotation = hinge.current.rotation
+    if (Math.abs(rotation.x - target) < 0.001) {
+      rotation.x = target
+      return
     }
-    if (led.current) led.current.visible = !pending || Math.sin(clock.elapsedTime * 8) > -0.35
+    rotation.x = MathUtils.damp(rotation.x, target, 8, Math.min(delta, 0.05))
+    invalidate()
   })
-  const led = useRef<Group>(null)
 
   return <group position={[(index - 1.5) * 1.62, 0, 0]}>
     <Block position={[0, 0.2, 0.3]} size={[1.51, 0.13, 1.76]} color="#62528b" />
@@ -100,7 +104,7 @@ function Compartment({ index, open, pending, internal, onLid }: {
       <Block position={[0, 0.035, 1.77]} size={[0.53, 0.11, 0.16]} color="#d7c5f4" />
       <Label position={[0, 0.1, 0.88]} size={[0.96, 0.48]} text={`0${index + 1}`} />
     </group>
-    <group ref={led} position={[0, 0.29, 1.25]}>
+    <group position={[0, 0.29, 1.25]}>
       <mesh>
         <sphereGeometry args={[0.067, 16, 12]} />
         <meshStandardMaterial color={pending ? '#ffc074' : '#655185'} emissive={pending ? '#ff8c30' : '#000000'} emissiveIntensity={1.4} />
@@ -123,18 +127,18 @@ function Model(props: DeviceProps) {
         <Label position={[x, 0.589, -0.94]} size={[0.32, 0.22]} text={['−', '+', 'OK'][index]} />
       </group>)}
     {props.open.map((open, index) => <Compartment key={index} index={index} open={open}
-      pending={props.pending[index]} internal={props.internal} onLid={() => props.onLid(index)} />)}
+      pending={props.pending[index]} internal={props.internal} onLid={() => { if (!props.internal) props.onLid(index) }} />)}
   </group>
 }
 
 export function Device(props: DeviceProps) {
-  return <Canvas dpr={[1, 1.6]} camera={{ position: [4.5, 5.1, 8.4], fov: 43 }}
+  return <Canvas frameloop="demand" dpr={[1, 1.6]} camera={{ position: [4.5, 5.1, 8.4], fov: 43 }}
     fallback={<p className="webgl-fallback">A visualização 3D precisa de WebGL. Os controles continuam disponíveis.</p>}>
     <ambientLight intensity={1.45} />
     <directionalLight position={[-4, 8, 6]} intensity={2.2} color="#fff3ed" />
     <directionalLight position={[5, 3, -6]} intensity={1.05} color="#d8c6ff" />
     <Model {...props} />
-    <ContactShadows position={[0, -0.105, 0]} scale={13} resolution={256} blur={2.7} opacity={0.42} far={5} />
+    <ContactShadows frames={1} position={[0, -0.105, 0]} scale={13} resolution={256} blur={2.7} opacity={0.42} far={5} />
     <OrbitControls target={[0, 0.32, 0]} enablePan={false} minDistance={6} maxDistance={15}
       maxPolarAngle={Math.PI / 2.25} makeDefault />
   </Canvas>
