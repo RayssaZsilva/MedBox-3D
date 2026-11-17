@@ -68,3 +68,52 @@ export function updateClock(state: ClockState, action: ClockAction): ClockState 
   const due = dueCompartments(state.now, now, action.times)
   return { ...state, now, pending: state.pending.map((pending, index) => pending || due.includes(index)) }
 }
+
+export const OK_HOLD_MS = 3000
+
+export type MenuMode =
+  | { kind: 'normal' }
+  | { kind: 'selecionar' }
+  | { kind: 'digito'; digit: number; draft: string }
+
+export type MenuState = { times: string[]; selected: number; mode: MenuMode }
+type MenuAction =
+  | { type: 'hold-ok' | 'ok' | 'cancel' }
+  | { type: 'move'; step: 1 | -1 }
+  | { type: 'select'; index: number }
+
+export function updateMenu(state: MenuState, action: MenuAction): MenuState {
+  const { mode, selected, times } = state
+  switch (action.type) {
+    case 'hold-ok':
+      return mode.kind === 'normal' ? { ...state, mode: { kind: 'selecionar' } } : state
+    case 'cancel':
+      return { ...state, mode: { kind: 'normal' } }
+    case 'select':
+      return {
+        ...state,
+        selected: action.index,
+        mode: mode.kind === 'normal' ? mode : { kind: 'selecionar' },
+      }
+    case 'move':
+      if (mode.kind === 'digito') {
+        return { ...state, mode: { ...mode, draft: changeDigit(mode.draft, mode.digit, action.step) } }
+      }
+      return mode.kind === 'selecionar'
+        ? { ...state, selected: (selected + action.step + times.length) % times.length }
+        : state
+    case 'ok':
+      if (mode.kind === 'normal') return state
+      if (mode.kind === 'selecionar') {
+        return { ...state, mode: { kind: 'digito', digit: 0, draft: times[selected] } }
+      }
+      if (mode.digit < 3) {
+        return { ...state, mode: { ...mode, digit: mode.digit + 1 } }
+      }
+      return {
+        ...state,
+        mode: { kind: 'normal' },
+        times: times.map((time, index) => index === selected ? mode.draft : time),
+      }
+  }
+}
