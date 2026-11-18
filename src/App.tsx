@@ -1,6 +1,9 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { Device } from './Device'
-import { formatClock, initialClock, MINUTE, parseTimes, STORAGE_KEY, updateClock, updateMenu } from './medbox'
+import {
+  CONFIRMATION_MS, CONFIRMATIONS_KEY, formatClock, initialClock, MINUTE, nextDoseTime,
+  parseConfirmations, parseTimes, STORAGE_KEY, updateClock, updateMenu,
+} from './medbox'
 import type { MenuState } from './medbox'
 import { useOkButton } from './useOkButton'
 
@@ -12,7 +15,15 @@ function readTimes() {
   }
 }
 
-function playAlarm(context: AudioContext) {
+function readConfirmations() {
+  try {
+    return parseConfirmations(localStorage.getItem(CONFIRMATIONS_KEY))
+  } catch {
+    return {}
+  }
+}
+
+function playAlarm(context: AudioContext, output: AudioNode) {
   const start = context.currentTime
   for (const [offset, frequency] of [[0, 880], [0.24, 1046], [0.48, 880]]) {
     const oscillator = context.createOscillator()
@@ -22,7 +33,7 @@ function playAlarm(context: AudioContext) {
     gain.gain.setValueAtTime(0.001, time)
     gain.gain.exponentialRampToValueAtTime(0.12, time + 0.025)
     gain.gain.exponentialRampToValueAtTime(0.001, time + 0.17)
-    oscillator.connect(gain).connect(context.destination)
+    oscillator.connect(gain).connect(output)
     oscillator.start(time)
     oscillator.stop(time + 0.18)
   }
@@ -36,7 +47,9 @@ export function App() {
   }))
   const { times, selected, mode } = menu
   const previousTimes = useRef(times)
-  const [clock, dispatch] = useReducer(updateClock, times, (saved) => initialClock(Date.now(), saved))
+  const [clock, dispatch] = useReducer(updateClock, times, (saved) =>
+    initialClock(Date.now(), saved, readConfirmations()))
+  const [confirmation, setConfirmation] = useState<number | null>(null)
   const [open, setOpen] = useState(() => times.map(() => false))
   const [internal, setInternal] = useState(false)
   const [sound, setSound] = useState(false)
@@ -55,9 +68,14 @@ export function App() {
   useEffect(() => {
     if (!sound || !active || !audio.current) return
     const context = audio.current
-    playAlarm(context)
-    const interval = window.setInterval(() => playAlarm(context), 2600)
-    return () => window.clearInterval(interval)
+    const output = context.createGain()
+    output.connect(context.destination)
+    playAlarm(context, output)
+    const interval = window.setInterval(() => playAlarm(context, output), 2600)
+    return () => {
+      output.disconnect()
+      window.clearInterval(interval)
+    }
   }, [active, sound])
 
   useEffect(() => () => { void audio.current?.close(); audio.current = null }, [])
@@ -89,25 +107,45 @@ export function App() {
     }
   }, [times])
 
+  useEffect(() => {
+    if (!clock.lastConfirmation) return
+    setConfirmation(clock.lastConfirmation.index)
+    try {
+      localStorage.setItem(CONFIRMATIONS_KEY, JSON.stringify(clock.confirmed))
+    } catch {
+      // The reducer still retains confirmations for this session.
+    }
+    const timer = window.setTimeout(() => setConfirmation(null), CONFIRMATION_MS)
+    return () => window.clearTimeout(timer)
+  }, [clock.confirmed, clock.lastConfirmation])
+
+  function confirmDose(index: number, fallback = false) {
+    dispatch({ type: 'confirm', index, fallback })
+  }
+
   function select(index: number) {
+    setConfirmation(null)
     menuDispatch({ type: 'select', index })
     setNote('')
   }
 
   function move(step: 1 | -1) {
+    if (mode.kind !== 'normal') setConfirmation(null)
     menuDispatch({ type: 'move', step })
   }
 
   function shortOk() {
     if (mode.kind === 'normal') {
-      if (clock.pending[selected]) dispatch({ type: 'confirm', index: selected })
+      confirmDose(selected, true)
       return
     }
+    setConfirmation(null)
     menuDispatch({ type: 'ok' })
   }
 
   const okButton = useOkButton(shortOk, () => {
     if (mode.kind !== 'normal') return
+    setConfirmation(null)
     setNote('')
     menuDispatch({ type: 'hold-ok' })
   })
@@ -121,24 +159,21 @@ export function App() {
   }
 
   function nextAlarm() {
-    const [hour, minute, second] = clockText.split(':').map(Number)
-    const now = hour * 60 + minute
-    const remaining = times.map((time) => {
-      const [h, m] = time.split(':').map(Number)
-      return (h * 60 + m - now + 1440) % 1440 || 1440
-    })
-    dispatch({ type: 'advance', value: Math.min(...remaining) * MINUTE - second * 1000, times })
+    const next = nextDoseTime(clock.now, times, clock.confirmed)
+    dispatch({ type: 'advance', value: next - clock.now, times })
   }
 
-  const digitIndex = mode.kind === 'digito' ? 6 + [0, 1, 3, 4][mode.digit] : -1
-  const lcdTop = {
+  const digitIndex = confirmation === null && mode.kind === 'digito' ? 6 + [0, 1, 3, 4][mode.digit] : -1
+  const lcdTop = confirmation !== null ? 'MEDICAMENTO OK' : {
     normal: `DOSE 0${selected + 1}   ${clock.pending[selected] ? 'ALERTA' : 'PRONTO'}`,
     selecionar: `SELECIONE DOSE ${selected + 1}`,
     digito: `AJUSTAR DOSE 0${selected + 1}`,
   }[mode.kind]
-  const lcdBottom = `HORA  ${mode.kind === 'digito' ? mode.draft : times[selected]}`
+  const lcdBottom = confirmation !== null
+    ? `COMPARTIMENTO ${confirmation + 1}`
+    : `HORA  ${mode.kind === 'digito' ? mode.draft : times[selected]}`
   const help = {
-    normal: 'Segure OK por 3 s para configurar · Toque para confirmar a dose selecionada',
+    normal: 'Segure OK por 3 s para configurar · Toque para confirmar uma dose pendente',
     selecionar: '+/− seleciona a dose · OK edita o horário',
     digito: mode.kind === 'digito'
       ? `Dígito ${mode.digit + 1} de 4 · +/− altera · OK ${mode.digit === 3 ? 'salva' : 'avança'}`
@@ -164,7 +199,7 @@ export function App() {
             </div>
           </div>
           <div className="scene">
-            <Device open={open} pending={clock.pending} internal={internal} onLid={toggleLid}
+            <Device open={open} pending={clock.pending.map(Boolean)} internal={internal} onLid={toggleLid}
               lcd={[lcdTop, lcdBottom]} lcdCursor={digitIndex} onStep={move} okButton={okButton} />
             <span className="scene-hint">{internal ? 'Bandeja articulada · Câmara inferior' : 'Arraste para girar · Role ou pince para ampliar'}</span>
           </div>
@@ -227,7 +262,7 @@ export function App() {
             <span className={`dot ${clock.pending[index] ? 'alert' : ''}`} aria-label={clock.pending[index] ? 'Alerta ativo' : 'Sem alerta'} />
             <strong>{time}</strong>
           </button>
-          <button className="confirm" disabled={!clock.pending[index]} onClick={() => dispatch({ type: 'confirm', index })}>Confirmar dose {index + 1}</button>
+          <button className="confirm" disabled={!clock.pending[index]} onClick={() => confirmDose(index)}>Confirmar dose {index + 1}</button>
         </article>)}</div>
       </section>
     </main>

@@ -31,42 +31,103 @@ export function formatClock(timestamp: number) {
     .map((part) => String(part).padStart(2, '0')).join(':')
 }
 
-export function dueCompartments(from: number, to: number, times: string[]): number[] {
-  if (to <= from) return []
-  return times.flatMap((time, index) => {
-    const [hours, minutes] = time.split(':').map(Number)
-    const latest = new Date(to)
-    latest.setHours(hours, minutes, 0, 0)
+export const CONFIRMATIONS_KEY = 'medbox.v1.confirmations'
+export const CONFIRMATION_MS = 2000
+
+// Each date stores a four-bit mask, one bit per compartment.
+export type Confirmations = Record<string, number>
+
+export function parseConfirmations(raw: string | null): Confirmations {
+  try {
+    const value: unknown = JSON.parse(raw ?? 'null')
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      return Object.fromEntries(Object.entries(value).filter(([day, mask]) =>
+        /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isInteger(mask) && mask > 0 && mask <= 15))
+    }
+  } catch {
+    // Ignore corrupt storage.
+  }
+  return {}
+}
+
+function dayKey(date: Date) {
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((part) => String(part).padStart(2, '0')).join('-')
+}
+
+function atDoseTime(timestamp: number, time: string) {
+  const [hours, minutes] = time.split(':').map(Number)
+  const date = new Date(timestamp)
+  date.setHours(hours, minutes, 0, 0)
+  return date
+}
+
+function dueDays(from: number, to: number, times: string[], confirmed: Confirmations) {
+  return times.map((time, index) => {
+    if (to <= from) return null
+    const latest = atDoseTime(to, time)
     if (latest.getTime() > to) {
       latest.setDate(latest.getDate() - 1)
+      const [hours, minutes] = time.split(':').map(Number)
       latest.setHours(hours, minutes, 0, 0)
     }
-    return latest.getTime() > from ? [index] : []
+    const day = dayKey(latest)
+    return latest.getTime() > from && !(confirmed[day] & (1 << index)) ? day : null
   })
 }
 
-export type ClockState = { now: number; pending: boolean[]; test: boolean }
+export function dueCompartments(from: number, to: number, times: string[]): number[] {
+  return dueDays(from, to, times, {}).flatMap((day, index) => day ? [index] : [])
+}
+
+export function nextDoseTime(now: number, times: string[], confirmed: Confirmations) {
+  return Math.min(...times.map((time, index) => {
+    let candidate = atDoseTime(now, time)
+    while (candidate.getTime() <= now || (confirmed[dayKey(candidate)] & (1 << index))) {
+      candidate.setDate(candidate.getDate() + 1)
+      candidate = atDoseTime(candidate.getTime(), time)
+    }
+    return candidate.getTime()
+  }))
+}
+
+export type ClockState = {
+  now: number
+  pending: (string | null)[]
+  confirmed: Confirmations
+  lastConfirmation: { index: number } | null
+  test: boolean
+}
 type ClockAction =
   | { type: 'tick' | 'advance'; value: number; times: string[] }
   | { type: 'toggle'; now: number }
-  | { type: 'confirm'; index: number }
+  | { type: 'confirm'; index: number; fallback?: boolean }
 
-export function initialClock(now: number, times: string[]): ClockState {
-  const due = dueCompartments(Math.floor(now / MINUTE) * MINUTE - 1, now, times)
-  return { now, pending: times.map((_, index) => due.includes(index)), test: false }
+export function initialClock(now: number, times: string[], confirmed: Confirmations = {}): ClockState {
+  const pending = dueDays(Math.floor(now / MINUTE) * MINUTE - 1, now, times, confirmed)
+  return { now, pending, confirmed, lastConfirmation: null, test: false }
 }
 
 export function updateClock(state: ClockState, action: ClockAction): ClockState {
   if (action.type === 'confirm') {
-    return { ...state, pending: state.pending.map((pending, index) => index !== action.index && pending) }
+    const index = state.pending[action.index] || !action.fallback
+      ? action.index : state.pending.findIndex(Boolean)
+    const day = state.pending[index]
+    if (!day) return state
+    return {
+      ...state,
+      pending: state.pending.map((pending, slot) => slot === index ? null : pending),
+      confirmed: { ...state.confirmed, [day]: (state.confirmed[day] ?? 0) | (1 << index) },
+      lastConfirmation: { index },
+    }
   }
   if (action.type === 'toggle') {
     return { ...state, test: !state.test, now: state.test ? action.now : state.now }
   }
   if ((action.type === 'advance') !== state.test) return state
   const now = action.type === 'advance' ? state.now + action.value : action.value
-  const due = dueCompartments(state.now, now, action.times)
-  return { ...state, now, pending: state.pending.map((pending, index) => pending || due.includes(index)) }
+  const due = dueDays(state.now, now, action.times, state.confirmed)
+  return { ...state, now, pending: state.pending.map((pending, index) => due[index] ?? pending) }
 }
 
 export const OK_HOLD_MS = 3000

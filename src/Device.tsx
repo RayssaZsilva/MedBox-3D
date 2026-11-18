@@ -262,16 +262,21 @@ function TopPanel({ lcd, lcdCursor, onStep, okButton }: DeviceProps) {
       size={[1.99, 0.54]} color="#23442c" background="#bddea6" />
     {buttonX.map((x, index) => {
       const ok = index === 2
-      return <group key={x} position={[x, 0, 0]}
-        onClick={(event) => { event.stopPropagation(); if (!ok) onStep(index === 0 ? -1 : 1) }}
-        onPointerDown={ok ? (event) => {
-          if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) okButton.press()
-        } : undefined}
-        onPointerUp={ok ? (event) => {
-          if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) okButton.release()
-        } : undefined}
-        onPointerCancel={ok ? okButton.cancel : undefined}
-        onPointerOut={ok ? okButton.cancel : undefined}>
+      return <group key={x} position={[x, 0, 0]} name={ok ? 'Botão OK' : undefined}>
+        {/* The hit area stays fixed while the visible key moves on press. */}
+        <mesh position={[0, 0.029, 0]}
+          onClick={(event) => { event.stopPropagation(); if (!ok) onStep(index === 0 ? -1 : 1) }}
+          onPointerDown={ok ? (event) => {
+            if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) okButton.press()
+          } : undefined}
+          onPointerUp={ok ? (event) => {
+            if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) okButton.release()
+          } : undefined}
+          onPointerCancel={ok ? okButton.cancel : undefined}
+          onPointerOut={ok ? okButton.cancel : undefined}>
+          <boxGeometry args={[0.65, 0.12, 0.49]} />
+          <meshBasicMaterial visible={false} />
+        </mesh>
         <group position={[0, ok && okButton.pressed ? -0.005 : 0.029, 0]}>
           <Block position={[0, 0, 0]} size={[0.65, 0.12, 0.49]} color="#d59ce8" radius={0.057} roughness={0.30} />
           <Label lines={[['−', '+', 'OK'][index]]} position={[0, 0.062, 0]} size={[0.60, 0.54]} color="#3b2053" />
