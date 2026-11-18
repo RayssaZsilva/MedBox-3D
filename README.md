@@ -18,13 +18,13 @@ npm run build
 - No modo normal, segure **OK** por 3 segundos para entrar no menu. Use **+ / −** para selecionar a dose e toque em **OK** para editar.
 - Em edição, **+ / −** alteram o dígito atual e **OK** avança. Depois do quarto dígito, **OK** salva no navegador.
 - Os horários iniciais são 08:00, 12:00, 18:00 e 22:00. O relógio usa o horário local.
-- **Ativar som** permite que o navegador reproduza o alarme. Os LEDs indicam as doses pendentes. Cada botão **Confirmar dose** encerra o alerta correspondente. Um toque em **OK** no modo normal confirma apenas a dose selecionada, se estiver pendente.
+- **Ativar som** permite que o navegador reproduza o alarme. Os LEDs indicam as doses pendentes. Cada botão **Confirmar dose** encerra o alerta correspondente. Um toque em **OK** no modo normal confirma uma dose pendente. O LCD mostra a primeira dose pendente pela ordem em que os horários foram salvos. Salvar novamente um horário move o compartimento para o fim dessa ordem. Horários sem registro de configuração entram depois, do compartimento 1 ao 4. Os horários e a ordem são salvos juntos no navegador. O LCD confirma a operação por cerca de dois segundos e então mostra a próxima dose pendente e o navegador registra a confirmação para a data da dose.
 - **Modo de teste** pausa o relógio em tempo real para avançar um minuto, uma hora ou até o próximo alerta. Ao sair do modo, o relógio volta ao horário local.
 - Clique nas tampas ou use os botões abaixo do modelo para abri-las individualmente. A vista **Interna** abre a bandeja pela articulação traseira para revelar a câmara inferior sem alterar a posição das tampas.
 
 ## Câmara eletrônica
 
-Uma ESP32, um RTC DS1307 e um buzzer ficam abaixo dos compartimentos. O LCD fica à esquerda no painel superior frontal inclinado, com os três botões à direita. Um LED vermelho sob cada tampa indica a dose pendente. Na confirmação pelo OK, apaga apenas o LED da dose selecionada. Os cabos da vista interna representam o chicote de sinais e as ligações comuns.
+Uma ESP32, um RTC DS1307 e um buzzer ficam abaixo dos compartimentos. O LCD fica à esquerda no painel superior frontal inclinado, com os três botões à direita. Um LED vermelho sob cada tampa indica a dose pendente. Na confirmação pelo OK, apaga apenas o LED da dose confirmada. Os cabos da vista interna representam o chicote de sinais e as ligações comuns.
 
 | Componente | Conexão na ESP32 |
 | --- | --- |
