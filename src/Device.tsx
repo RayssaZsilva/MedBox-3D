@@ -1,7 +1,8 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { ContactShadows, OrbitControls, RoundedBox } from '@react-three/drei'
 import { memo, useEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, CanvasTexture, CatmullRomCurve3, DoubleSide, Float32BufferAttribute, Group, MathUtils, ShapeUtils, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { CanvasTexture, CatmullRomCurve3, Group, MathUtils, PerspectiveCamera, SRGBColorSpace, Vector3 } from 'three'
+import { caseSize, createHousing, createWell, deckHeight, hingeZ, lcdX, ledZ, panelAngle, panelZ } from './deviceGeometry'
 import type { OkButton } from './useOkButton'
 
 type Point = [number, number, number]
@@ -17,21 +18,22 @@ type DeviceProps = {
   okButton: OkButton
 }
 
-const slots = [-2.43, -0.81, 0.81, 2.43]
-const lids = ['#a989e5', '#a284dc', '#9b79d8', '#9470d4']
-const graphite = '#41384f'
+const slots = [-2.37, -0.79, 0.79, 2.37]
+const lids = ['#bd8cde', '#bc89dc', '#bc89dd', '#bf8ee0']
+const graphite = '#443151'
 const metal = '#b6bdc6'
 const brass = '#cba360'
 const ledWires = [[18, '#f4a845'], [19, '#df6568'], [17, '#a492ff'], [16, '#7ebdf2']] as const
 
-function Block({ position, size, color, radius = 0, metalness = 0 }: {
+function Block({ position, size, color, radius = 0, metalness = 0, roughness = 0.47 }: {
   position: Point
   size: Point
   color: string
   radius?: number
   metalness?: number
+  roughness?: number
 }) {
-  const material = <meshStandardMaterial color={color} roughness={0.47} metalness={metalness} />
+  const material = <meshStandardMaterial color={color} roughness={roughness} metalness={metalness} />
   return radius ? <RoundedBox position={position} args={size} radius={radius} smoothness={2}>
     {material}
   </RoundedBox> : <mesh position={position}>
@@ -54,12 +56,13 @@ function Cylinder({ position, radius, height, color, rotation, metalness = 0 }: 
   </mesh>
 }
 
-function Label({ lines, position, size, color = '#fff', cursor = -1 }: {
+function Label({ lines, position, size, color = '#fff', cursor = -1, background }: {
   lines: string[]
   position: Point
   size: [number, number]
   color?: string
   cursor?: number
+  background?: string
 }) {
   const content = lines.join('\n')
   const texture = useMemo(() => {
@@ -69,13 +72,17 @@ function Label({ lines, position, size, color = '#fff', cursor = -1 }: {
     canvas.height = 256
     const context = canvas.getContext('2d')!
     context.textBaseline = 'middle'
+    if (background) {
+      context.fillStyle = background
+      context.fillRect(0, 0, 512, 256)
+    }
     context.fillStyle = color
     if (rows.length === 1) {
       context.textAlign = 'center'
       context.font = `700 ${content.length > 4 ? 65 : 102}px monospace`
       context.fillText(content, 256, 132, 475)
     } else {
-      context.font = '700 44px monospace'
+      context.font = '700 49px monospace'
       const cell = 28
       rows.forEach((row, line) => {
         const y = 78 + 99 * line
@@ -94,20 +101,25 @@ function Label({ lines, position, size, color = '#fff', cursor = -1 }: {
     const map = new CanvasTexture(canvas)
     map.colorSpace = SRGBColorSpace
     return map
-  }, [content, color, cursor])
+  }, [content, color, cursor, background])
   useEffect(() => () => texture.dispose(), [texture])
   return <mesh rotation={[-Math.PI / 2, 0, 0]} position={position}>
     <planeGeometry args={size} />
-    <meshBasicMaterial map={texture} transparent depthWrite={false} />
+    <meshBasicMaterial map={texture} transparent={!background} depthWrite={!!background} toneMapped={false} />
   </mesh>
 }
 
 function Compartment({ index, open, onLid }: { index: number; open: boolean; onLid: () => void }) {
   const hinge = useRef<Group>(null)
+  const well = useMemo(createWell, [])
+  useEffect(() => () => Object.values(well).forEach((geometry) => geometry.dispose()), [well])
+  const hingeY = 0.74
+  const hingeRotation: Point = [0, 0, Math.PI / 2]
+
   useFrame(({ invalidate }, delta) => {
     if (!hinge.current) return
     const rotation = hinge.current.rotation
-    const target = open ? -1.88 : 0
+    const target = open ? -MathUtils.degToRad(108) : 0
     if (Math.abs(rotation.x - target) < 0.001) {
       rotation.x = target
       return
@@ -116,21 +128,25 @@ function Compartment({ index, open, onLid }: { index: number; open: boolean; onL
     invalidate()
   })
 
-  return <group position={[slots[index], 0, 0]}>
-    <Block position={[0, 0.21, -0.14]} size={[1.56, 0.12, 1.98]} color="#b4a0cc" radius={0.05} />
-    {[-0.75, 0.75].map((x) => <Block key={x} position={[x, 0.48, -0.14]}
-      size={[0.086, 0.52, 1.98]} color="#d6c7e7" radius={0.031} />)}
-    {[-1.07, 0.79].map((z) => <Block key={z} position={[0, 0.48, z]}
-      size={[1.54, 0.52, 0.12]} color="#d6c7e7" radius={0.04} />)}
-    {[-0.55, 0.55].map((x) => <Cylinder key={x} position={[x, 0.76, -1.09]}
-      rotation={[0, 0, Math.PI / 2]} radius={0.071} height={0.27} color={graphite} />)}
-    <Cylinder position={[0, 0.76, -1.09]} rotation={[0, 0, Math.PI / 2]}
-      radius={0.041} height={1.42} color={metal} metalness={0.55} />
-    <group ref={hinge} position={[0, 0.76, -1.09]} onClick={(event) => { event.stopPropagation(); onLid() }}>
-      <Block position={[0, 0.026, 0.925]} size={[1.57, 0.16, 1.94]} color={lids[index]} radius={0.074} />
-      <Block position={[0, -0.04, 0.925]} size={[1.43, 0.12, 1.76]} color={lids[index]} radius={0.045} />
-      <Block position={[0, 0, 1.9]} size={[0.50, 0.105, 0.18]} color="#ded0f2" radius={0.045} />
-      <Label lines={[`0${index + 1}`]} position={[0, 0.109, 0.94]} size={[0.72, 0.40]} />
+  return <group name={`Compartimento 0${index + 1}`} position={[slots[index], 0, 0]}>
+    {Object.entries(well).map(([part, geometry]) => <mesh key={part} geometry={geometry}>
+      <meshStandardMaterial color="#dfccec" roughness={0.57} />
+    </mesh>)}
+    {[-0.37, 0.37].map((x) => <group key={x}>
+      <Block position={[x, 0.67, hingeZ]} size={[0.24, 0.10, 0.19]} color={graphite} radius={0.035} />
+      <Cylinder position={[x, hingeY, hingeZ]} rotation={hingeRotation}
+        radius={0.090} height={0.24} color="#694482" />
+    </group>)}
+    <Cylinder position={[0, hingeY, hingeZ]} rotation={hingeRotation}
+      radius={0.035} height={1.00} color={metal} metalness={0.52} />
+    <group ref={hinge} name={`Tampa 0${index + 1}`} position={[0, hingeY, hingeZ]}
+      onClick={(event) => { event.stopPropagation(); onLid() }}>
+      <Cylinder position={[0, 0, 0]} rotation={hingeRotation} radius={0.087} height={0.50} color={lids[index]} />
+      <Block position={[0, 0.035, 1.46]} size={[1.525, 0.21, 2.89]} color={lids[index]} radius={0.102} roughness={0.33} />
+      <Block position={[0, -0.083, 1.46]} size={[1.35, 0.07, 2.72]} color="#a874c8" radius={0.033} />
+      <Block position={[0, -0.008, 2.899]} size={[0.42, 0.12, 0.15]} color="#b37bd4" radius={0.057} />
+      <Block position={[0, 0.141, 1.45]} size={[0.60, 0.012, 0.48]} color="#edcff4" radius={0.005} />
+      <Label lines={[`0${index + 1}`]} position={[0, 0.149, 1.45]} size={[0.72, 0.56]} color="#5b287d" />
     </group>
   </group>
 }
@@ -152,21 +168,21 @@ function Wire({ color, points }: { color: string; points: Point[] }) {
   </mesh>
 }
 
-const panelZ = -1.59
-const panelSurface = 0.56
-const lcdHalfWidth = 0.86
-const lcdHalfDepth = 0.23
-const buttonX = [1.25, 1.72, 2.19]
+const buttonX = [0.56, 1.43, 2.30]
 const buttonPins = ['33', '32', '26']
 const buttonColors = ['#f4e173', '#e89cba', '#f39c63']
 
-// The upper panel's harness rises through the chamber to the underside of the deck.
 function panelLead(x: number): Point[] {
-  return [[x, -0.27, -0.95], [x, -0.12, panelZ], [x, panelSurface - 0.035, panelZ]]
+  return [[x, -0.32, 1.18], [x, -0.18, panelZ], [x, deckHeight(panelZ) - 0.105, panelZ]]
 }
 
 const Electronics = memo(function Electronics() {
   return <group name="Câmara eletrônica inferior">
+    <group position={[0, deckHeight(panelZ), panelZ]} rotation={[panelAngle, 0, 0]}>
+      <Block position={[lcdX, -0.13, 0]} size={[2.14, 0.08, 0.64]} color="#2b6751" radius={0.028} />
+      {buttonX.map((x) => <Block key={x} position={[x, -0.13, 0]} size={[0.36, 0.09, 0.34]}
+        color="#262334" radius={0.026} />)}
+    </group>
     <group name="ESP32">
       <Block position={[-1.68, -0.45, -0.17]} size={[0.83, 0.06, 1.25]} color="#202933" radius={0.03} />
       <Block position={[-1.68, -0.39, -0.34]} size={[0.49, 0.08, 0.48]} color={metal} radius={0.025} metalness={0.4} />
@@ -195,11 +211,11 @@ const Electronics = memo(function Electronics() {
     </group>
     <group name="Chicote de sinais">
       {ledWires.map(([pin, color], index) => <Wire key={pin} color={color} points={[
-        espPins[pin], [-1.04, -0.29, 0.08 + index * 0.10], [slots[index], -0.26, 0.72 + index * 0.06],
-        [slots[index], -0.10, 1.12], [slots[index], 0.18, 1.22],
+        espPins[pin], [-1.04, -0.29, 0.08 + index * 0.10], [slots[index], -0.30, 0.81 + index * 0.045],
+        [slots[index], 0.16, ledZ], [slots[index], deckHeight(ledZ) - 0.055, ledZ],
       ]} />)}
       {buttonPins.map((pin, index) => <Wire key={pin} color={buttonColors[index]} points={[
-        espPins[pin], [-2.24, -0.31, 0.60 + index * 0.10], [buttonX[index], -0.31, -0.14 - index * 0.15],
+        espPins[pin], [-2.24, -0.37, 0.40 + index * 0.08], [buttonX[index], -0.34, 0.73 + index * 0.09],
         ...panelLead(buttonX[index]),
       ]} />)}
       {(['21', '22'] as const).map((pin, index) => {
@@ -208,119 +224,42 @@ const Electronics = memo(function Electronics() {
         return <group key={pin} name={index === 0 ? 'I²C SDA GPIO21' : 'I²C SCL GPIO22'}>
           <Wire color={color} points={[espPins[pin], [-1.04, -0.24, 0.08 + index * 0.12], junction]} />
           <Wire color={color} points={[junction, [-0.29, -0.28, -0.07], [0.13 + index * 0.09, -0.34, -0.24]]} />
-          <Wire color={color} points={[junction, [-0.77 + index * 0.14, -0.28, -0.55], ...panelLead(-0.30 + index * 0.15)]} />
+          <Wire color={color} points={[junction, [-0.94 + index * 0.14, -0.32, 0.78], ...panelLead(lcdX - 0.26 + index * 0.14)]} />
         </group>
       })}
       <Wire color="#d493ea" points={[espPins['25'], [-2.33, -0.28, -0.54], [-0.91, -0.26, -0.88], [1.16, -0.40, -0.43]]} />
       <Wire color="#dc6969" points={[espPins.power, [-2.25, -0.38, 0.66], [-0.22, -0.34, 0.51], [0.31, -0.35, -0.24]]} />
-      <Wire color="#dc6969" points={[[-0.22, -0.34, 0.51], [-0.44, -0.33, -0.52], ...panelLead(0)]} />
+      <Wire color="#dc6969" points={[[-0.22, -0.34, 0.51], [lcdX + 0.02, -0.36, 0.88], ...panelLead(lcdX + 0.02)]} />
       <Wire color="#545873" points={[espPins.gnd, [-2.37, -0.40, 0.65], [-0.02, -0.40, 0.54], [1.28, -0.41, -0.42]]} />
-      <Wire color="#545873" points={[[0.40, -0.35, -0.24], [0.47, -0.42, 0.22], [-0.02, -0.40, 0.54], [0.24, -0.34, -0.52], ...panelLead(0.15)]} />
+      <Wire color="#545873" points={[[0.40, -0.35, -0.24], [0.47, -0.42, 0.22], [-0.02, -0.40, 0.54], [lcdX + 0.16, -0.37, 0.92], ...panelLead(lcdX + 0.16)]} />
       {slots.map((x, index) => <Wire key={x} color="#545873" points={[
-        [-0.02, -0.40, 0.54], [x + 0.07, -0.34, 0.83 + index * 0.06],
-        [x + 0.07, -0.18, 1.08], [x + 0.04, 0.17, 1.20],
+        [-0.02, -0.40, 0.54], [x + 0.07, -0.38, 0.79 + index * 0.045],
+        [x + 0.07, 0.07, ledZ], [x + 0.05, deckHeight(ledZ) - 0.055, ledZ],
       ]} />)}
       {buttonX.map((x, index) => <Wire key={x} color="#545873" points={[
-        [-0.02, -0.40, 0.54], [x + 0.05, -0.36, -0.18 - index * 0.10], ...panelLead(x + 0.08),
+        [-0.02, -0.40, 0.54], [x + 0.05, -0.38, 0.74 + index * 0.075], ...panelLead(x + 0.08),
       ]} />)}
     </group>
   </group>
 })
 
-function createEnclosure() {
-  const side = 3.325
-  const innerSide = 3.18
-  const front = 1.325
-  const innerFront = 1.16
-  const rear = -1.95
-  const innerRear = -1.84
-  const deckEdge = -1.24
-  const bottom = -0.645
-  const floor = -0.455
-  const rim = 0.19
-  const deckUnderside = panelSurface - 0.12
-  const positions: number[] = []
-
-  function quad(a: Point, b: Point, c: Point, d: Point) {
-    positions.push(...a, ...b, ...c, ...a, ...c, ...d)
-  }
-
-  function horizontal(y: number, left: number, right: number, back: number, forward: number) {
-    quad([left, y, back], [right, y, back], [right, y, forward], [left, y, forward])
-  }
-
-  function wall(z: number, halfWidth: number, low: number, high: number) {
-    quad([-halfWidth, low, z], [halfWidth, low, z], [halfWidth, high, z], [-halfWidth, high, z])
-  }
-
-  // Both exterior side walls follow the same profile from the floor to the rear deck.
-  function sideWall(x: number, low: number, back: number, forward: number, top: number) {
-    const profile = [
-      new Vector2(low, back), new Vector2(top, back), new Vector2(top, deckEdge),
-      new Vector2(rim, deckEdge), new Vector2(rim, forward), new Vector2(low, forward),
-    ]
-    for (const face of ShapeUtils.triangulateShape(profile, [])) {
-      for (const vertex of face) positions.push(x, profile[vertex].x, profile[vertex].y)
-    }
-  }
-
-  horizontal(bottom, -side, side, rear, front)
-  horizontal(floor, -innerSide, innerSide, innerRear, innerFront)
-  wall(front, side, bottom, rim)
-  wall(innerFront, innerSide, floor, rim)
-  wall(rear, side, bottom, panelSurface)
-  wall(innerRear, innerSide, floor, deckUnderside)
-  wall(deckEdge, side, deckUnderside, panelSurface)
-  for (const sign of [-1, 1]) {
-    sideWall(sign * side, bottom, rear, front, panelSurface)
-    sideWall(sign * innerSide, floor, innerRear, innerFront, deckUnderside)
-  }
-  horizontal(rim, -side, side, innerFront, front)
-  horizontal(rim, -side, -innerSide, deckEdge, innerFront)
-  horizontal(rim, innerSide, side, deckEdge, innerFront)
-  quad([-side, rim, deckEdge], [-innerSide, rim, deckEdge],
-    [-innerSide, deckUnderside, deckEdge], [-side, deckUnderside, deckEdge])
-  quad([innerSide, rim, deckEdge], [side, rim, deckEdge],
-    [side, deckUnderside, deckEdge], [innerSide, deckUnderside, deckEdge])
-
-  // Leave an aperture in the molded deck so the LCD sits below its surface.
-  const lcdRear = panelZ - lcdHalfDepth
-  const lcdFront = panelZ + lcdHalfDepth
-  for (const y of [panelSurface, deckUnderside]) {
-    const halfWidth = y === panelSurface ? side : innerSide
-    const back = y === panelSurface ? rear : innerRear
-    horizontal(y, -halfWidth, -lcdHalfWidth, back, deckEdge)
-    horizontal(y, lcdHalfWidth, halfWidth, back, deckEdge)
-    horizontal(y, -lcdHalfWidth, lcdHalfWidth, back, lcdRear)
-    horizontal(y, -lcdHalfWidth, lcdHalfWidth, lcdFront, deckEdge)
-  }
-  wall(lcdRear, lcdHalfWidth, deckUnderside, panelSurface)
-  wall(lcdFront, lcdHalfWidth, deckUnderside, panelSurface)
-  for (const x of [-lcdHalfWidth, lcdHalfWidth]) {
-    quad([x, deckUnderside, lcdRear], [x, deckUnderside, lcdFront],
-      [x, panelSurface, lcdFront], [x, panelSurface, lcdRear])
-  }
-
-  const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-  geometry.computeVertexNormals()
-  return geometry
-}
-
 function Enclosure() {
-  const geometry = useMemo(createEnclosure, [])
-  useEffect(() => () => geometry.dispose(), [geometry])
-  return <mesh name="Corpo integrado" geometry={geometry}>
-    <meshStandardMaterial color="#625477" roughness={0.47} side={DoubleSide} />
-  </mesh>
+  const housing = useMemo(createHousing, [])
+  useEffect(() => () => Object.values(housing).forEach((geometry) => geometry.dispose()), [housing])
+  return <group name="Corpo integrado">
+    {Object.entries(housing).map(([part, geometry]) => <mesh key={part} geometry={geometry}>
+      <meshStandardMaterial color={part === 'frontDeck' ? '#563969' : '#493057'}
+        roughness={part === 'frontDeck' ? 0.47 : 0.39} />
+    </mesh>)}
+  </group>
 }
 
 function TopPanel({ lcd, lcdCursor, onStep, okButton }: DeviceProps) {
-  return <group name="Painel superior" position={[0, panelSurface, panelZ]}>
-    <Block position={[0, -0.056, 0]} size={[lcdHalfWidth * 2, 0.084, lcdHalfDepth * 2]} color="#282b31" radius={0.027} />
-    <Block position={[0, -0.018, 0]} size={[1.53, 0.017, 0.35]} color="#bedca2" radius={0.02} />
-    <Label lines={lcd} cursor={lcdCursor} position={[0, -0.008, 0]}
-      size={[1.43, 0.31]} color="#25403a" />
+  return <group name="Painel superior frontal" position={[0, deckHeight(panelZ), panelZ]} rotation={[panelAngle, 0, 0]}>
+    <Block position={[lcdX, -0.027, 0]} size={[2.30, 0.075, 0.75]} color="#232029" radius={0.036} />
+    <Block position={[lcdX, 0.014, 0]} size={[2.11, 0.019, 0.60]} color="#a8c697" radius={0.009} />
+    <Label lines={lcd} cursor={lcdCursor} position={[lcdX, 0.026, 0]}
+      size={[1.99, 0.54]} color="#23442c" background="#bddea6" />
     {buttonX.map((x, index) => {
       const ok = index === 2
       return <group key={x} position={[x, 0, 0]}
@@ -333,9 +272,9 @@ function TopPanel({ lcd, lcdCursor, onStep, okButton }: DeviceProps) {
         } : undefined}
         onPointerCancel={ok ? okButton.cancel : undefined}
         onPointerOut={ok ? okButton.cancel : undefined}>
-        <group position={[0, ok && okButton.pressed ? -0.005 : 0.023, 0]}>
-          <Block position={[0, 0, 0]} size={[0.27, 0.08, 0.24]} color="#a385d1" radius={0.027} />
-          <Label lines={[['−', '+', 'OK'][index]]} position={[0, 0.042, 0]} size={[0.28, 0.26]} />
+        <group position={[0, ok && okButton.pressed ? -0.005 : 0.029, 0]}>
+          <Block position={[0, 0, 0]} size={[0.65, 0.12, 0.49]} color="#d59ce8" radius={0.057} roughness={0.30} />
+          <Label lines={[['−', '+', 'OK'][index]]} position={[0, 0.062, 0]} size={[0.60, 0.54]} color="#3b2053" />
         </group>
       </group>
     })}
@@ -344,55 +283,77 @@ function TopPanel({ lcd, lcdCursor, onStep, okButton }: DeviceProps) {
 
 function FrontLeds({ pending }: { pending: boolean[] }) {
   return <group name="LEDs frontais">
-    {slots.map((x, index) => <group key={x} position={[x, 0.17, 1.18]} name={`LED GPIO${ledWires[index][0]}`}>
-      <Cylinder position={[0, 0.04, 0]} radius={0.091} height={0.047} color={graphite} />
-      <mesh position={[0, 0.08, 0]}>
-        <sphereGeometry args={[0.061, 15, 10]} />
-        <meshStandardMaterial color={pending[index] ? '#ffd48e' : '#87737b'}
-          emissive={pending[index] ? '#ff962f' : '#000'} emissiveIntensity={1.3} roughness={0.22} />
+    {slots.map((x, index) => <group key={x} name={`LED GPIO${ledWires[index][0]}`}
+      position={[x, deckHeight(ledZ), ledZ]} rotation={[panelAngle, 0, 0]}>
+      <Block position={[0, 0.002, 0]} size={[0.19, 0.045, 0.095]} radius={0.022} color="#351d42" />
+      <Block position={[0, 0.025, 0]} size={[0.142, 0.036, 0.064]} radius={0.017} color="#481629" roughness={0.23} />
+      <mesh position={[0, 0.039, 0]}>
+        <sphereGeometry args={[0.052, 18, 12]} />
+        <meshStandardMaterial color={pending[index] ? '#ff5555' : '#722034'}
+          emissive={pending[index] ? '#ff1622' : '#000000'} emissiveIntensity={pending[index] ? 2.2 : 0} roughness={0.22} />
       </mesh>
+      {pending[index] && <pointLight color="#ff202b" intensity={0.10} distance={0.38} position={[0, 0.12, 0.015]} />}
     </group>)}
   </group>
 }
 
+const serviceHinge: Point = [0, 0.65, -1.99]
+
 function Model(props: DeviceProps) {
   const tray = useRef<Group>(null)
-  const inspection = useRef(0)
   useFrame(({ invalidate }, delta) => {
     if (!tray.current) return
-    const target = props.internal ? 1 : 0
-    const current = inspection.current
-    if (current === target) return
-    const next = MathUtils.damp(current, target, 8, Math.min(delta, 0.05))
-    inspection.current = Math.abs(next - target) < 0.002 ? target : next
-    // Lift above the fixed rear panel before sliding back. Reverse the path when closing.
-    const lift = MathUtils.smoothstep(inspection.current, 0, 0.5)
-    const slide = MathUtils.smoothstep(inspection.current, 0.5, 1)
-    tray.current.position.set(0, lift * 1.05, slide * -1.35)
-    if (inspection.current !== target) invalidate()
+    const goal = props.internal ? -1.06 : 0
+    if (Math.abs(tray.current.rotation.x - goal) < 0.001) {
+      tray.current.rotation.x = goal
+      return
+    }
+    tray.current.rotation.x = MathUtils.damp(tray.current.rotation.x, goal, 8, Math.min(delta, 0.05))
+    invalidate()
   })
   return <group>
     <Enclosure />
     {props.internal && <Electronics />}
     <FrontLeds pending={props.pending} />
     <TopPanel {...props} />
-    <group ref={tray} name="Bandeja de medicamentos">
-      <Block position={[0, 0.14, -0.12]} size={[6.51, 0.17, 2.22]} color="#9d84ba" radius={0.073} />
-      {props.open.map((open, index) => <Compartment key={index} index={index} open={open}
-        onLid={() => props.onLid(index)} />)}
+    {[-2.99, 2.99].map((x) => <Cylinder key={x} position={[x, serviceHinge[1], serviceHinge[2] - 0.04]}
+      radius={0.062} height={0.31} color={graphite} rotation={[0, 0, Math.PI / 2]} />)}
+    <group ref={tray} position={serviceHinge} name="Bandeja articulada">
+      <group position={[0, -serviceHinge[1], -serviceHinge[2]]}>
+        <Block position={[0, 0.235, -0.542]} size={[6.23, 0.10, 2.84]} color="#795a8e" radius={0.045} />
+        {[-2.99, 2.99].map((x) => <Block key={x} position={[x, 0.54, -1.94]} size={[0.21, 0.23, 0.19]}
+          color={graphite} radius={0.035} />)}
+        {props.open.map((open, index) => <Compartment key={index} index={index} open={open}
+          onLid={() => props.onLid(index)} />)}
+      </group>
     </group>
   </group>
 }
 
+function DeviceFraming({ expanded, internal }: { expanded: boolean; internal: boolean }) {
+  useFrame(({ camera, size, invalidate }, delta) => {
+    if (!(camera instanceof PerspectiveCamera)) return
+    const compactViewport = Math.min(1, size.width / (size.height * 1.22))
+    const zoom = compactViewport * (internal ? 0.80 : expanded ? 0.79 : 1)
+    if (camera.zoom === zoom) return
+    const next = MathUtils.damp(camera.zoom, zoom, 8, Math.min(delta, 0.05))
+    camera.zoom = Math.abs(zoom - next) < 0.002 ? zoom : next
+    camera.updateProjectionMatrix()
+    if (camera.zoom !== zoom) invalidate()
+  })
+  return null
+}
+
 export function Device(props: DeviceProps) {
-  return <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: [2.85, 9.5, 7.0], fov: 42 }}
+  return <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: [-4.2, 7.4, 7.05], fov: 39 }}
     fallback={<p className="webgl-fallback">A visualização 3D precisa de WebGL. Os controles continuam disponíveis.</p>}>
-    <ambientLight intensity={1.3} />
-    <directionalLight position={[-4, 8, 6]} intensity={2.0} color="#fff3ed" />
-    <directionalLight position={[5, 3, -6]} intensity={1.05} color="#d8c6ff" />
+    <ambientLight intensity={1.12} />
+    <directionalLight position={[-4, 8, 6]} intensity={2.20} color="#fff3ed" />
+    <directionalLight position={[5, 3, -6]} intensity={1.18} color="#d8c6ff" />
+    <DeviceFraming expanded={props.open.some(Boolean)} internal={props.internal} />
     <Model {...props} />
-    <ContactShadows frames={1} position={[0, -0.655, 0]} scale={13} resolution={256} blur={2.8} opacity={0.39} far={5} />
-    <OrbitControls target={[0, 0.34, -0.48]} enablePan={false} minDistance={6} maxDistance={17}
+    <ContactShadows frames={1} position={[0, caseSize.bottom - 0.01, 0]} scale={13} resolution={256} blur={2.8} opacity={0.51} far={5} />
+    <OrbitControls target={[0, 0.29, 0.03]} enablePan={false} minDistance={6} maxDistance={17}
       maxPolarAngle={Math.PI / 2.12} makeDefault />
   </Canvas>
 }

@@ -166,7 +166,7 @@ export function App() {
           <div className="scene">
             <Device open={open} pending={clock.pending} internal={internal} onLid={toggleLid}
               lcd={[lcdTop, lcdBottom]} lcdCursor={digitIndex} onStep={move} okButton={okButton} />
-            <span className="scene-hint">{internal ? 'Vista explodida da câmara inferior' : 'Arraste para girar · Role ou pince para ampliar'}</span>
+            <span className="scene-hint">{internal ? 'Bandeja articulada · Câmara inferior' : 'Arraste para girar · Role ou pince para ampliar'}</span>
           </div>
           <div className="lid-controls">{open.map((isOpen, index) => <button key={index}
             aria-pressed={isOpen} onClick={() => toggleLid(index)}>
