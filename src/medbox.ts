@@ -2,17 +2,29 @@ export const DEFAULT_TIMES = ['08:00', '12:00', '18:00', '22:00']
 export const STORAGE_KEY = 'medbox.v1.times'
 export const MINUTE = 60_000
 
-export function parseTimes(raw: string | null): string[] {
+export type Schedule = { times: string[]; order: number[] }
+
+export function parseSchedule(raw: string | null): Schedule {
   try {
     const value: unknown = JSON.parse(raw ?? 'null')
-    if (Array.isArray(value) && value.length === 4 &&
-      value.every((time) => typeof time === 'string' && /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(time))) {
-      return value
+    // Previous versions stored only the array of times.
+    const data = value as Partial<Schedule> | null
+    const times = Array.isArray(value) ? value : data?.times
+    if (Array.isArray(times) && times.length === DEFAULT_TIMES.length &&
+      times.every((time) => typeof time === 'string' && /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(time))) {
+      const order = Array.isArray(data?.order) ? data.order : []
+      return { times, order: [...new Set(order.filter((slot) =>
+        Number.isInteger(slot) && slot >= 0 && slot < times.length))] }
     }
   } catch {
     // A stale or malformed entry can be replaced by the defaults.
   }
-  return [...DEFAULT_TIMES]
+  return { times: [...DEFAULT_TIMES], order: [] }
+}
+
+export function confirmationQueue(pending: (string | null)[], order: number[]) {
+  const priority = new Set([...order, ...pending.keys()])
+  return [...priority].filter((index) => pending[index])
 }
 
 export function changeDigit(time: string, digit: number, step: 1 | -1): string {
@@ -101,7 +113,8 @@ export type ClockState = {
 type ClockAction =
   | { type: 'tick' | 'advance'; value: number; times: string[] }
   | { type: 'toggle'; now: number }
-  | { type: 'confirm'; index: number; fallback?: boolean }
+  | { type: 'confirm'; index: number }
+  | { type: 'confirm-next'; order: number[] }
 
 export function initialClock(now: number, times: string[], confirmed: Confirmations = {}): ClockState {
   const pending = dueDays(Math.floor(now / MINUTE) * MINUTE - 1, now, times, confirmed)
@@ -109,9 +122,8 @@ export function initialClock(now: number, times: string[], confirmed: Confirmati
 }
 
 export function updateClock(state: ClockState, action: ClockAction): ClockState {
-  if (action.type === 'confirm') {
-    const index = state.pending[action.index] || !action.fallback
-      ? action.index : state.pending.findIndex(Boolean)
+  if (action.type === 'confirm' || action.type === 'confirm-next') {
+    const index = action.type === 'confirm' ? action.index : confirmationQueue(state.pending, action.order)[0]
     const day = state.pending[index]
     if (!day) return state
     return {
@@ -137,7 +149,7 @@ export type MenuMode =
   | { kind: 'selecionar' }
   | { kind: 'digito'; digit: number; draft: string }
 
-export type MenuState = { times: string[]; selected: number; mode: MenuMode }
+export type MenuState = Schedule & { selected: number; mode: MenuMode }
 type MenuAction =
   | { type: 'hold-ok' | 'ok' | 'cancel' }
   | { type: 'move'; step: 1 | -1 }
@@ -175,6 +187,7 @@ export function updateMenu(state: MenuState, action: MenuAction): MenuState {
         ...state,
         mode: { kind: 'normal' },
         times: times.map((time, index) => index === selected ? mode.draft : time),
+        order: [...state.order.filter((index) => index !== selected), selected],
       }
   }
 }

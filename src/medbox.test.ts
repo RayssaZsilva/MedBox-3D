@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { changeDigit, DEFAULT_TIMES, dueCompartments, initialClock, MINUTE, nextDoseTime, parseConfirmations, parseTimes, updateClock, updateMenu } from './medbox.ts'
+import { changeDigit, confirmationQueue, DEFAULT_TIMES, dueCompartments, initialClock, MINUTE, nextDoseTime, parseConfirmations, parseSchedule, updateClock, updateMenu } from './medbox.ts'
 import type { MenuState } from './medbox.ts'
 
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 10, day, hour, minute).getTime()
 
 test('restores four valid stored schedules and rejects malformed values', () => {
   const valid = ['00:00', '23:59', '08:30', '08:30']
-  assert.deepEqual(parseTimes(JSON.stringify(valid)), valid)
+  assert.deepEqual(parseSchedule(JSON.stringify(valid)), { times: valid, order: [] })
   for (const bad of [null, 'oops', '[]', '["24:00","12:00","18:00","22:00"]']) {
-    assert.deepEqual(parseTimes(bad), DEFAULT_TIMES)
+    assert.deepEqual(parseSchedule(bad), { times: DEFAULT_TIMES, order: [] })
   }
 })
 
@@ -40,7 +40,7 @@ test('test clock freezes wall ticks and confirmations clear only the chosen alar
 })
 
 test('requires a long OK press to select and saves only the configured dose after four digits', () => {
-  const normal: MenuState = { times: DEFAULT_TIMES, selected: 0, mode: { kind: 'normal' } }
+  const normal: MenuState = { times: DEFAULT_TIMES, order: [], selected: 0, mode: { kind: 'normal' } }
   assert.equal(updateMenu(normal, { type: 'ok' }), normal)
   assert.equal(updateMenu(normal, { type: 'move', step: 1 }), normal)
   let state = updateMenu(normal, { type: 'hold-ok' })
@@ -64,26 +64,52 @@ test('requires a long OK press to select and saves only the configured dose afte
 
 test('cancel exits to normal and changing the selected dose discards an unsaved draft', () => {
   const editing: MenuState = {
-    times: DEFAULT_TIMES, selected: 0, mode: { kind: 'digito', draft: '00:00', digit: 2 },
+    times: DEFAULT_TIMES, order: [], selected: 0, mode: { kind: 'digito', draft: '00:00', digit: 2 },
   }
   const selecting = updateMenu(editing, { type: 'select', index: 1 })
   assert.equal(selecting.mode.kind, 'selecionar')
   assert.deepEqual(updateMenu(selecting, { type: 'ok' }).mode, { kind: 'digito', draft: '12:00', digit: 0 })
   assert.deepEqual(updateMenu(editing, { type: 'cancel' }), {
-    times: DEFAULT_TIMES, selected: 0, mode: { kind: 'normal' },
+    times: DEFAULT_TIMES, order: [], selected: 0, mode: { kind: 'normal' },
   })
 })
 
-test('OK falls back to one pending compartment and prefers the selected dose when pending', () => {
-  const clock = initialClock(at(17, 12), ['08:00', '12:00', '12:00', '22:00'])
-  assert.equal(updateClock(clock, { type: 'confirm', index: 0 }), clock)
-  const selected = updateClock(clock, { type: 'confirm', index: 2, fallback: true })
-  assert.deepEqual(selected.lastConfirmation, { index: 2 })
-  assert.deepEqual(selected.pending.map(Boolean), [false, true, false, false])
-  const fallback = updateClock(selected, { type: 'confirm', index: 2, fallback: true })
-  assert.deepEqual(fallback.lastConfirmation, { index: 1 })
-  assert.deepEqual(fallback.pending.map(Boolean), [false, false, false, false])
-  assert.equal(updateClock(fallback, { type: 'confirm', index: 2, fallback: true }), fallback)
+test('saved order survives reload and drives all four simultaneous confirmations', () => {
+  const slots = [2, 0, 3, 1]
+  let menu: MenuState = { times: DEFAULT_TIMES, order: [], selected: 0, mode: { kind: 'normal' } }
+  for (const index of slots) {
+    menu = updateMenu({ ...menu, selected: index, mode: { kind: 'digito', digit: 3, draft: '21:59' } }, { type: 'ok' })
+  }
+  const { order, times } = parseSchedule(JSON.stringify(menu))
+  assert.deepEqual(order, slots)
+  assert.deepEqual(times, ['21:59', '21:59', '21:59', '21:59'])
+  let clock = initialClock(at(17, 21, 59), times)
+  for (const index of slots) {
+    assert.equal(confirmationQueue(clock.pending, order)[0], index)
+    clock = updateClock(clock, { type: 'confirm-next', order })
+    assert.deepEqual(clock.lastConfirmation, { index })
+    assert.equal(clock.pending[index], null)
+  }
+  assert.equal(updateClock(clock, { type: 'confirm-next', order }), clock)
+})
+
+test('different alarm times queue only pending slots in saved order', () => {
+  const order = [2, 0]
+  let clock = initialClock(at(17, 8), DEFAULT_TIMES)
+  assert.deepEqual(confirmationQueue(clock.pending, order), [0])
+  clock = updateClock(clock, { type: 'tick', value: at(17, 18), times: DEFAULT_TIMES })
+  assert.deepEqual(confirmationQueue(clock.pending, order), [2, 0, 1])
+  clock = updateClock(clock, { type: 'confirm-next', order })
+  assert.deepEqual(confirmationQueue(clock.pending, order), [0, 1])
+  clock = updateClock(clock, { type: 'confirm', index: 1 })
+  assert.deepEqual(confirmationQueue(clock.pending, order), [0])
+})
+
+test('handles invalid order values and moves reconfigured slots to the end', () => {
+  const schedule = parseSchedule(JSON.stringify({ times: DEFAULT_TIMES, order: [2, 2, '1', 4, 0] }))
+  assert.deepEqual(schedule.order, [2, 0])
+  const edited = updateMenu({ ...schedule, selected: 2, mode: { kind: 'digito', digit: 3, draft: '18:00' } }, { type: 'ok' })
+  assert.deepEqual(edited.order, [0, 2])
 })
 
 test('stores confirmations by occurrence date across reload and scheduling edits', () => {

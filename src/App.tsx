@@ -1,17 +1,17 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { Device } from './Device'
 import {
-  CONFIRMATION_MS, CONFIRMATIONS_KEY, formatClock, initialClock, MINUTE, nextDoseTime,
-  parseConfirmations, parseTimes, STORAGE_KEY, updateClock, updateMenu,
+  CONFIRMATION_MS, CONFIRMATIONS_KEY, confirmationQueue, formatClock, initialClock, MINUTE, nextDoseTime,
+  parseConfirmations, parseSchedule, STORAGE_KEY, updateClock, updateMenu,
 } from './medbox'
 import type { MenuState } from './medbox'
 import { useOkButton } from './useOkButton'
 
-function readTimes() {
+function readSchedule() {
   try {
-    return parseTimes(localStorage.getItem(STORAGE_KEY))
+    return parseSchedule(localStorage.getItem(STORAGE_KEY))
   } catch {
-    return parseTimes(null)
+    return parseSchedule(null)
   }
 }
 
@@ -41,11 +41,11 @@ function playAlarm(context: AudioContext, output: AudioNode) {
 
 export function App() {
   const [menu, menuDispatch] = useReducer(updateMenu, null, (): MenuState => ({
-    times: readTimes(),
+    ...readSchedule(),
     selected: 0,
     mode: { kind: 'normal' },
   }))
-  const { times, selected, mode } = menu
+  const { times, order, selected, mode } = menu
   const previousTimes = useRef(times)
   const [clock, dispatch] = useReducer(updateClock, times, (saved) =>
     initialClock(Date.now(), saved, readConfirmations()))
@@ -55,7 +55,10 @@ export function App() {
   const [sound, setSound] = useState(false)
   const [note, setNote] = useState('')
   const audio = useRef<AudioContext | null>(null)
-  const active = clock.pending.some(Boolean)
+  const queue = confirmationQueue(clock.pending, order)
+  const currentDose = queue[0]
+  const active = queue.length > 0
+  const displayedDose = mode.kind === 'normal' ? currentDose ?? selected : selected
   const clockText = formatClock(clock.now)
 
   useEffect(() => {
@@ -100,12 +103,12 @@ export function App() {
     if (previousTimes.current === times) return
     previousTimes.current = times
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(times))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ times, order }))
       setNote('Horário salvo neste navegador.')
     } catch {
       setNote('Horário atualizado apenas nesta sessão.')
     }
-  }, [times])
+  }, [times, order])
 
   useEffect(() => {
     if (!clock.lastConfirmation) return
@@ -119,12 +122,12 @@ export function App() {
     return () => window.clearTimeout(timer)
   }, [clock.confirmed, clock.lastConfirmation])
 
-  function confirmDose(index: number, fallback = false) {
-    dispatch({ type: 'confirm', index, fallback })
+  function confirmDose(index?: number) {
+    dispatch(index === undefined ? { type: 'confirm-next', order } : { type: 'confirm', index })
   }
 
   function select(index: number) {
-    setConfirmation(null)
+    if (mode.kind !== 'normal') setConfirmation(null)
     menuDispatch({ type: 'select', index })
     setNote('')
   }
@@ -136,7 +139,7 @@ export function App() {
 
   function shortOk() {
     if (mode.kind === 'normal') {
-      confirmDose(selected, true)
+      confirmDose()
       return
     }
     setConfirmation(null)
@@ -165,15 +168,15 @@ export function App() {
 
   const digitIndex = confirmation === null && mode.kind === 'digito' ? 6 + [0, 1, 3, 4][mode.digit] : -1
   const lcdTop = confirmation !== null ? 'MEDICAMENTO OK' : {
-    normal: `DOSE 0${selected + 1}   ${clock.pending[selected] ? 'ALERTA' : 'PRONTO'}`,
+    normal: `DOSE 0${displayedDose + 1}   ${active ? 'ALERTA' : 'PRONTO'}`,
     selecionar: `SELECIONE DOSE ${selected + 1}`,
     digito: `AJUSTAR DOSE 0${selected + 1}`,
   }[mode.kind]
   const lcdBottom = confirmation !== null
     ? `COMPARTIMENTO ${confirmation + 1}`
-    : `HORA  ${mode.kind === 'digito' ? mode.draft : times[selected]}`
+    : `HORA  ${mode.kind === 'digito' ? mode.draft : times[displayedDose]}`
   const help = {
-    normal: 'Segure OK por 3 s para configurar · Toque para confirmar uma dose pendente',
+    normal: 'Segure OK por 3 s para configurar · Toque para confirmar a primeira dose da fila',
     selecionar: '+/− seleciona a dose · OK edita o horário',
     digito: mode.kind === 'digito'
       ? `Dígito ${mode.digit + 1} de 4 · +/− altera · OK ${mode.digit === 3 ? 'salva' : 'avança'}`
@@ -254,10 +257,10 @@ export function App() {
       </div>
       <section className="schedule" aria-labelledby="schedule-title">
         <div className="schedule-head"><div><h2 id="schedule-title">Horários dos medicamentos</h2><p>Selecione uma dose no menu de configuração ou confirme quando o LED acender.</p></div>
-          <p className="feedback" role="status">{note || (active ? `${clock.pending.filter(Boolean).length} dose(s) aguardando confirmação` : '')}</p>
+          <p className="feedback" role="status">{note || (active ? `${queue.length} dose(s) aguardando confirmação` : '')}</p>
         </div>
-        <div className="schedule-grid">{times.map((time, index) => <article key={index} className={`dose ${selected === index ? 'selected' : ''}`}>
-          <button className="dose-select" aria-pressed={selected === index} onClick={() => select(index)}>
+        <div className="schedule-grid">{times.map((time, index) => <article key={index} className={`dose ${displayedDose === index ? 'selected' : ''}`}>
+          <button className="dose-select" aria-pressed={displayedDose === index} onClick={() => select(index)}>
             <span className="dose-label"><span className="number">0{index + 1}</span> Dose {index + 1}</span>
             <span className={`dot ${clock.pending[index] ? 'alert' : ''}`} aria-label={clock.pending[index] ? 'Alerta ativo' : 'Sem alerta'} />
             <strong>{time}</strong>
